@@ -1,0 +1,39 @@
+---
+output: html_document
+---
+```{r xtable, results="asis"}
+library(xtable)
+
+m <- mtcars[1:3, 1:4]
+print(xtable(m, digits=c(0, 2, 2, 1, 2)), type="html")
+
+n <- 100
+x <- rnorm(n)
+y <- 2*x + rnorm(n)
+out <- lm(y ~ x)
+tab <- xtable(summary(out)$coef, digits=c(0, 2, 2, 1, 2))
+print(tab, type="html")
+```
+&nbsp;
+
+&nbsp;
+
+
+<table border = 1>
+<tr>
+<td>
+```{r results='asis', echo=FALSE}
+  library(xtable)
+  data(tli)
+  print(xtable(tli[1:20, ]),type='html')
+```
+</td>
+<td>
+```{r results='asis', echo=FALSE}
+  library(xtable)
+  data(tli)
+  print(xtable(tli[1:20, ]),type='html',comment=FALSE)
+```
+</td>
+</tr>
+</table>

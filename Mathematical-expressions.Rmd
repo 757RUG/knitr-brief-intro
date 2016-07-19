@@ -1,0 +1,21 @@
+---
+title: "Mathematical notation"
+author: "April Liu"
+date: "July 19, 2016"
+output: html_document
+---
+
+This summation expression $\sum_{i=1}^n X_i$ appears **inline**.
+
+This is X square $X^2$
+
+Square of the element on $i^{th}$ row and $j^{th}$ column:  $X^2_{i,j}$
+
+
+**The following notations are in display form.**
+
+Quadratic Formula: $$\frac{-b\pm\sqrt{b^2 - 4ac}}{2a}$$     
+Summation: 
+$$\sum_{i=1}^n X_i$$
+Estimate of a variable:
+$$\widehat{abcd}$$

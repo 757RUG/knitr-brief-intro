@@ -1,0 +1,474 @@
+---
+title: "Service Request Submission Dayparting Analysis"
+author: "April Liu"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  pdf_document:
+    fig_height: 8
+    fig_width: 6
+    keep_tex: yes  
+    latex_engine: xelatex
+    template: sample_template.tex
+---
+
+``` {r global_parms, echo=FALSE, eval=TRUE, warning=FALSE, cache=TRUE}
+
+options(stringsAsFactors=FALSE)
+ 
+suppressWarnings(suppressPackageStartupMessages(library(knitr)))
+knitr::opts_chunk$set(results='asis', echo=FALSE, eval=TRUE, cache=TRUE, message = FALSE, warning = FALSE)
+
+```
+
+```{r load-packages, cache=FALSE, echo=FALSE, eval=TRUE, message=F, warning=F}
+
+options(stringsAsFactors = F)
+
+suppressWarnings(suppressPackageStartupMessages(library(plyr)))
+suppressWarnings(suppressPackageStartupMessages(library(dplyr)))
+suppressWarnings(suppressPackageStartupMessages(library(tidyr)))
+suppressWarnings(suppressPackageStartupMessages(library(lubridate)))
+suppressWarnings(suppressPackageStartupMessages(library(cellranger)))
+suppressWarnings(suppressPackageStartupMessages(library(ggplot2)))
+suppressWarnings(suppressPackageStartupMessages(library(RForcecom)))
+suppressWarnings(suppressPackageStartupMessages(library(pander)))
+suppressWarnings(suppressPackageStartupMessages(library(bpaalib)))
+suppressWarnings(suppressPackageStartupMessages(library(stringr)))
+
+```
+
+```{r load-data, cache=TRUE, echo=FALSE, eval=TRUE, message=FALSE}
+data <- read.csv("dayparting_data.csv")
+data$TIME_STAMP <- as.POSIXct(data$TIME_STAMP, format="%m/%d/%Y %H:%M")
+data$ZIP_CODE <-str_pad(as.character(data$ZIP_CODE),5, "left", pad="0")
+data[,6:13] <- apply(data[,6:13],2, as.numeric)
+data$DUPE_COUNTER <- as.numeric(data$DUPE_COUNTER)
+```
+
+```{r new-variables-from-timestamp,echo=FALSE, eval=TRUE}
+
+# create a new variable to store the week of the day of service requests
+data$DayofWeek <- weekdays(data$TIME_STAMP)
+data$DayofWeek <- factor(data$DayofWeek, levels = c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"))
+data$hours <- hour(data$TIME_STAMP)
+# get the count of service requests in each day of the week
+count1 <- aggregate(data, by=list(data$DayofWeek), FUN=length)[,c(1,2)]
+colnames(count1)<-c("DayofWeek","count")
+count1 <- count1[order(count1$DayofWeek),]
+count1 <- count1 %>% mutate(perc=100*count/sum(count))
+count1$count <- NULL
+
+```
+
+
+The purpose of this analysis is to find out whether the time that service requests were submitted has anything to do with the type of service requests.
+Time of Day and Day of Week was determined using the timestamp that the service request was submitted. We examined different types of service requests by submitters' credit score, price range of service requested, purchase time, and state to see if dayparting might drastically affect service request types.
+
+The main finding of this analysis are that hourly trend of service request submission are related to states, regions and which day of week that day is. If any decision or comparison need to be made regarding hourly trends, these 3 factors are worth considering. Furthermore, the Southern U.S. region has a different pattern of hourly trend with other regions, so special sales strategy may be required for states located in the South.
+
+## Analysis
+
+This bar plot below gives a direct view of the percentages of service request over days of a week.
+According the plot, more service requests are submitted on Mondays, than any other day. The other days of the week have roughly equal service request submissions.
+
+```{r bar-plot,fig.width=10, fig.height=8,echo=FALSE, eval=TRUE}
+
+dodge <- position_dodge(width = 0.5)
+ggplot(count1, aes(x=DayofWeek,y=perc)) +
+  geom_bar(stat="identity",position = dodge) +
+  ggtitle("Percent of Total service requests Submitted In Each Day of Week") +
+  xlab("Day of Week") +
+  ylab("Percent of Total service requests  (%)") +
+  geom_text(aes(label = paste0(round(perc,2),"%")), size = 5, hjust = 0.5, vjust = -0.5) + 
+  theme(plot.title = element_text(size=22),
+        axis.text=element_text(size=15),
+        axis.title=element_text(size=16))
+
+```
+
+Submissions are roughly the same except for Mondays, but we further examined whether the time of day that service requests were submitted is different for certain days.
+
+```{r time-serie-plot, fig.width=8, fig.height=6,echo=FALSE, eval=TRUE}
+
+ts_prep <- data %>%
+  group_by(DayofWeek,hours) %>%
+  summarise( count=n())
+
+ggplot(data=ts_prep,aes(x=hours,y=count)) + geom_line(aes(color=DayofWeek),size=1.5) +
+  ggtitle("Hourly service request counts for days in a week") +
+  xlab("Hours in a day") +
+  ylab("service request counts") +
+  theme(panel.grid.major = element_blank(),
+        plot.title = element_text(size=22),
+        axis.text=element_text(size=15),
+        axis.title=element_text(size=16)) +
+  scale_x_discrete(breaks=c(seq(0,23,3),23))
+
+```
+
+The pattern of changing over hours are quite similar for the days, but Monday and Sunday witness higher extent of fluctuation, and of course the values are larger than the other days.
+
+
+We want to make sure whether the day of week does affect the number of service requests submitted in each hour of that day. Chi-square test shows that day of week and hour of day are not independent; suggesting that what day of week that day is does make difference in how many service requests will be submitted over 24 hours of the days.
+
+
+
+##  **Hourly Submission by Day of Week** 
+```{r DayofWeek-and-hours,echo=FALSE, eval=FALSE, message=FALSE}
+
+tbl1 <- table(data$DayofWeek,as.factor(data$hours))
+chisq.test(tbl1)  
+
+```
+Day of Week and Time of Day were found to not be independent $X^2$ (138, N = 8685 ) = 186.37, p = .003.
+
+**So the difference in number of service requests in hours of the day is affected by which day of the week that day is.** 
+
+
+
+
+##  **service request submission in daily time periods by Day of Week** 
+For interpretation purpose, we group 24 hours in a day into "morning"(0:00 AM-11:59 AM), "afternoon" (12:00 PM-6:59 PM) and "night"(7:00 PM-11:59 PM). We calculate the percentages of total service request submission in this 3 periods of a day to see when more service requests are submitted.
+
+```{r Mekko-graphics, warning=FALSE, fig.width=10, fig.height=8,echo=FALSE, eval=TRUE}
+
+# make Mekko graphics to show the percentage of service requests submitted in periods of a day in each day of week.
+mek_data <- data %>% select(DayofWeek,hours)
+mek_data <- mutate(mek_data,
+            time = ifelse(hours<=11,"morning",ifelse(hours<=18,"afternoon","night")))
+summ <- mek_data %>% group_by(DayofWeek,time) %>% summarise(counts=n())
+total <- summ %>% group_by(DayofWeek) %>% summarise(tol_counts=sum(counts)) %>% select(tol_counts)
+total_vec <- as.numeric(rep(unlist(total), each=3))
+summ2 <- cbind(summ,total_vec)
+summ2$time <-factor(summ2$time, levels=c("morning","afternoon","night"))
+summ2 <- summ2 %>% mutate(perc=round(100*counts/total_vec,2))
+summ2 <- summ2[order(summ2$DayofWeek,summ2$time),]
+
+ggplot(summ2, aes(x=DayofWeek,y=perc, fill = time)) +
+  geom_bar(stat="identity") + 
+  ggtitle("Percentage of service request count for 3 periods of a day") +
+  xlab("Day of a week") +
+  ylab("Percentage of service request count in 3 periods (%)") +
+  #geom_text(aes(label = mean_val), size = 3.1, hjust = 0.5, vjust = -0.4,position= position_dodge(width=0.6))+ 
+  scale_fill_manual(values = c( "light green","light blue","pink")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        plot.title = element_text(size=22),
+        axis.text=element_text(size=15),
+        axis.title=element_text(size=16)) +
+  geom_text(aes(label = paste0(perc,"%")), size = 5, hjust = 0.5, vjust = 3, position = "stack") 
+
+```
+
+This stacked bar plot above shows the percentage of service requests submitted in periods of a day in each day of week.
+
+For all 7 days, most of the service request submission happen in the afternoon period, while night period witness the least. From the bar chart we speculate that period of the day is independent from days of the week.  We can run independence test to investigate such speculation.
+
+```{r ,echo=FALSE, eval=TRUE}
+
+data <- mutate(data ,
+            time = ifelse(hours<=11,"morning",ifelse(hours<=18,"afternoon","night")))
+```
+
+```{r period-of-day-and-dayofweek, warning=FALSE,echo=FALSE, eval=FALSE}
+
+tbl_DoW_time<- table(DOW=data$DayofWeek,Time=data$time)
+chisq.test(tbl_DoW_time)
+
+```
+Day of Week and Period of Day were found to not be independent $X^2$ (12, N = 8685 ) = 34.79, p = .0005.
+
+**The distribution of service request submissions across morning, afternoon, and evening is different depending on the day of the week.**
+
+
+```{r categorize-variables, warning=FALSE, echo=FALSE, eval=TRUE}
+
+# Categorize PRICE (higher than 200K nor not)
+# abandon missing values
+missing1 <- which(is.na(data$PRICE_CATEGORY)) 
+data$PRICE_CATEGORY <-  ifelse(data$PRICE>200000,1,0)
+data$PRICE_CATEGORY[missing1] <- NA
+
+
+# Re-categorize CREDIT_SCORE_CATEGORY (higher than 620 nor not)
+# abandon missing values
+missing2 <- which(data$CREDIT_SCORE_CATEGORY==0) # row 31,32,33
+data$NEW_CREDIT_SCORE_CATEGORY <- ifelse(data$CREDIT_SCORE_CATEGORY %in% 101:105,1,0)
+data$NEW_CREDIT_SCORE_CATEGORY[missing2] <- NA
+
+missing <- c(missing1,missing2)
+#data1 <- data[-missing,]
+data1 <- data
+# data1 has no misisng value for variable NEW_CREDIT_SCORE_CATEGORY and PRICE_CATEGORY
+
+```
+
+
+
+##  **service request Timing by Credit Scores** 
+
+By testing the independency of credit score category and Day of week, what we are testing is actually whether there is any significance in patterns between the distributions of service request counts over 7 days of a week in those 2 credict score categories. If difference exists, then the two category variables are not independent. 
+
+```{r independence-test-explanaton, fig.width=6, fig.height=6,echo=FALSE, eval=TRUE}
+
+cred_cat <- ifelse(data1$NEW_CREDIT_SCORE_CATEGORY==0,'620+','Less than 620')
+dodge <- position_dodge(width = 0.5)
+ggplot(data1, aes(x = cred_cat,fill = DayofWeek)) +
+  geom_bar(width = 0.5, position = dodge) +
+  ggtitle("Credit Score group VS. Day of week") +
+  xlab("Credit Score group") +
+  ylab("service request counts") + 
+  theme(plot.title = element_text(size=22),
+        axis.text=element_text(size=15),
+        axis.title=element_text(size=16))
+
+```
+
+The plot above shows that the distributions are quite similar, so we can assume that the submitters' credit score is different among days of the week.
+
+In the statistical test, the logic is that We first calculate how many service requests we would expect if credit score was not related to service request submission counts and compare with reality to see if there is a difference. Large difference suggests rejection of independence assumption, meaning that the two variables have no effect on each other.
+
+observed counts and rounded value of expectation in ():
+```{r ,echo=FALSE, eval=TRUE} 
+tbl3 <- table(DayofWeek=data1$DayofWeek ,CREDIT_CAT=data1$NEW_CREDIT_SCORE_CATEGORY)
+```
+
+```{r,echo=FALSE, eval=TRUE} 
+expct <- round(chisq.test(tbl3)$expected) 
+```
+
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+
+```{r display-table, echo=FALSE, eval=TRUE,comment=NA}
+
+df1 <- as.data.frame(tbl3)
+df2 <- as.data.frame(as.table(expct))
+colnames(df1) <-c( "DayofWeek", "CREDIT_CAT", "Observed")
+colnames(df2) <-c( "DayofWeek", "CREDIT_CAT", "Expected")
+df1$Observed <- paste("   ",as.character(df1$Observed))
+df2$Expected <- paste0("(",as.character(df2$Expected),")")
+combined <- merge(df1,df2,by=c("DayofWeek","CREDIT_CAT"))
+combined$all <- paste0(combined$Observed," ",combined$Expected)
+combined <- combined %>% select(DayofWeek, CREDIT_CAT,all)
+combined$DayofWeek <- factor(combined$DayofWeek,levels=c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"))
+combined <- combined[order(combined$DayofWeek),]
+row <- as.factor(c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"))
+col <- as.factor(c("Low Credit Score","High Credit Score"))
+mtrx <- matrix(combined$all, nrow=7,ncol=2,byrow = FALSE)
+rownames(mtrx) <- row
+colnames(mtrx) <- col
+pandoc.table(mtrx, split.cells = 2,style = "grid")
+
+```
+
+
+Difference between values in the two table above are not statistically significant, suggesting that the assumption is very close to the fact.
+
+```{r NEW_CREDIT_SCORE_CATEGORY-and-DayofWeek,echo=FALSE, eval=FALSE}
+
+chisq.test(tbl3) 
+
+```
+Day of Week and Credit Score Category were found to not be independent $X^2$ (6, N = 8685 )=8.10, p = .231.
+
+**There is no evidence suggesting a pattern that service requests in a particular day of week is of higher or lower credit score.**
+
+
+
+##  **Hourly service request Submission by Regions**
+We group states into regions(Northeast, Midwest, South and West) and investigate how it is related to hourly service request submission trends.
+
+```{r add-region,echo=FALSE, echo=FALSE, eval=TRUE}
+
+region <- read.csv('./US STATES REGIONS SUBREGIONS.csv') %>% select(State.Code,Region)
+# setdiff(data3$STATE,region$State.Code)
+
+data_region <- merge(x = data1, y = region, by.x = "STATE", by.y = "State.Code", all.x = TRUE)
+data_region$Region <- as.character(data_region$Region)
+data_region$Region <- ifelse(is.na(data_region$Region),"Other",data_region$Region)
+data_region2 <- data_region %>% filter(Region!='Other')
+data_region2$Region <- as.factor(data_region2$Region)
+
+```
+
+```{r tets-independency-Hours-and-region,echo=FALSE, echo=FALSE, eval=FALSE}
+# region and hours
+tbl_reg_hours<- table(Reg=data_region2$Region,Day=data_region2$hours)
+chisq.test(tbl_reg_hours)
+# p-value < 2.2e-16     dependent
+
+```
+Hours in a day and Regions were found to be not independent $X^2$ (69, N = 8685 ) = 264.13, p < 2.2e-16.
+
+**Region of the service request makes difference for at what hour the service request is submitted.** It might be interesting to see what the difference is. The time series plot below shows that hourly trend for South region is quite different from the other three. Southern states have larger counts of service requests submission and higher level of fluctuation. 
+
+```{r hourly-TS-plot-for-regions,fig.width=8, fig.height=6, echo=FALSE, eval=TRUE}
+
+ts_prep2 <- data_region2 %>%
+  group_by(Region,hours) %>%
+  summarise( count=n())
+
+ggplot(data=ts_prep2,aes(x=hours,y=count)) + geom_line(aes(color=Region),size=1.5) +
+  ggtitle("Hourly Trend during a day for Various Regions") +
+  xlab("Hours in a day") +
+  ylab("service request counts") +
+  theme(panel.grid.major = element_blank(),
+        plot.title = element_text(size=22),
+        axis.text=element_text(size=15),
+        axis.title=element_text(size=16)) + 
+  scale_x_discrete(breaks=c(seq(0,23,3),23))
+
+```
+
+
+Similar tests as the above three were applied to the types of service requests and day of the week/Hours of the day. More information can be found in the Appendix part. 
+
+
+## **Conclusion**
+
+1. Monday is the peak of service requests submission, and Monday morning customers are more active in comparison with other mornings.
+
+2. Not all the states have the same pattern of hourly service request submission in a day.
+
+3. Day of week will affect the hourly service request submission in that day.
+    
+   Such conclusion means it may be note-worthy that if we want to make hourly comparison about how service requests are submitted in a day, the comparison need to be performed between the same day of week. For instance, it is more meaningful to compare service request counts submitted at 3:00 PM today and at the same time 7 days ago than to compare 3:00 PM today and the same time yesterday.
+   
+4. Not all the regions have the same pattern of hourly service request submission in a day
+   
+   **Southern states not only have larger counts of service requests submission, they also experience higher level of fluctuation**, especially after 8:00 AM. Such difference suggests that when it comes to decision making, southern states may require special strategy comparing with other regions.
+
+
+
+## **APPENDIX**
+
+
+##  **Hourly service request Submission by Credit Score Category** 
+
+```{r NEW_CREDIT_SCORE_CATEGORY-and-hours, echo=FALSE, eval=FALSE}
+
+tbl4 <- table(hours=data1$hours,CREDIT_CAT=data1$NEW_CREDIT_SCORE_CATEGORY)
+chisq.test(tbl4) 
+
+```
+Credit Score category was found to be independent of Hours of the day $X^2$ (23, N = 8685 ) = 34.91, p = .053.
+
+**No pattern discovered that service requests in a particular hour of day is of higher or lower credit score.**
+
+
+##  **Price Category by Houry service request Submission** 
+
+```{r PRICE_CATEGORY-and-hours,echo=FALSE, eval=FALSE,warning=F}
+
+tbl5 <- table(hours=data1$hours,PRICE_CAT=data1$PRICE_CATEGORY)
+chisq.test(tbl5) 
+
+```
+Price category was found to be independent of Hours of the day $X^2$ (23, N = 8685 ) = 27.02, p = .255.
+
+**No pattern discovered that service requests submitted in a particular hour of day falls into higher or lower price category.**
+
+
+
+
+##  **Price Category by Day of Week** 
+```{r PRICE_CATEGORY-and-DayofWeek,echo=FALSE, eval=FALSE, warning=F}
+
+tbl6 <- table(DayofWeek=data1$DayofWeek,PRICE_CAT=data1$PRICE_CATEGORY)
+chisq.test(tbl6) 
+
+```
+Price category was found to be independent of day of week $X^2$ (6, N = 8685 ) = 9.25, p = .16.
+
+**No pattern that service requests submitted in a particular day of week may fall into higher or lower price category. **
+
+
+
+##  **Day of Week/hours in a day by Purchase Time$^*$ Category**
+$*$ purchase time category means how long the time is between service request submission and purchase 
+ 
+```{r DayofWeek-and-PURCHASE_TIME_CATEGORY,echo=FALSE, eval=FALSE}
+
+table(data$PURCHASE_TIME_CATEGORY)
+tbl <- table(data$DayofWeek,data$PURCHASE_TIME_CATEGORY)
+chisq.test(tbl) 
+# independent   
+# Which day of week doesn't affect when the customer want purchase
+```
+
+Day of Week and Purchase time were found to be independent $X^2$ (24, N = 8685 ) = 28.377, p = .245.
+
+```{r hours-and-PURCHASE_TIME_CATEGORY,echo=FALSE, eval=FALSE}
+tbl <- table(data$hours,data$PURCHASE_TIME_CATEGORY)
+chisq.test(tbl) 
+# independent
+# neither does hour of the day
+
+```
+Hours in a day and Purchase time were found to be independent $X^2$ (92, N = 8685 ) = 111.83, p = .078.
+
+Test results show that **which day of week doesn't affect when the customer want purchase, neither does hour of the day**
+
+
+
+ 
+Now we take geography factor into consideration:
+
+##  **DayofWeek/hours in a day by States**
+```{r geography(STATE)-and-DayofWeek,echo=FALSE, eval=FALSE}
+
+tbl_st_dow <- table(STATE=data1$STATE,Day=data1$DayofWeek)
+chisq.test(tbl_st_dow,simulate.p.value=T) 
+```
+Day of Week and State were found to be independent $X^2$ ($NA^*$, N = 8685 ) = 324.55, p = .757.
+
+ 
+```{r geography(STATE)-and-hours,echo=FALSE, eval=FALSE}
+# geography(STATE) and Hours of day
+tbl_st_hour <- table(STATE=data1$STATE,hour=data1$hours)
+chisq.test(tbl_st_hour,simulate.p.value=T) 
+# p-value = 0.001999
+```
+Hours in a day and State were found to be not independent $X^2$ ($NA^*$, N = 8685 ) = 1539.5, p = .001.
+
+**No pattern exists that more or less service requests are submitted in certain states on a particular day of week.But it is suggested that more or less service requests are submitted in certain states on some particular hours of a day** 
+
+$*$ Monte Carlo is used to deal with the sparsity of data, resulting that no degree of freedom can be reported in this chi-square test
+
+
+
+##  **DayofWeek/hours in a day by Regions**
+
+
+```{r tests-independency-DayofWeek-and-region,echo=FALSE, echo=FALSE, eval=FALSE}
+# region and day of week
+tbl_reg_dow <- table(Reg=data_region2$Region,Day=data_region2$DayofWeek)
+chisq.test(tbl_reg_dow)
+# p-value = 0.3312     independent
+
+```
+Day of Week and Regions were found to be independent $X^2$ (18, N = 8685 ) = 16.353, p = .568.
+
+```{r test-independency-Hours-and-region,echo=FALSE, echo=FALSE, eval=FALSE}
+# region and hours
+tbl_reg_hours<- table(Reg=data_region2$Region,Day=data_region2$hours)
+chisq.test(tbl_reg_hours)
+# p-value < 2.2e-16     dependent
+
+```
+Hours in a day and Regions were found to be not independent $X^2$ (69, N = 8685 ) = 264.13, p < 2.2e-16.
+
+**Region of the service request does not affect how many service requests are submitted over 7 days of a week**
+**Region of the service request makes difference for at what hour the service request is submitted**
+
+
+
+
